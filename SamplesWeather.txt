@@ -1,0 +1,195 @@
+# =====================================================
+# Sample Weather Events for Validation. Processing Script
+# Functionality: Florencia Sangermano
+# Development: The functionality of this script was designed by the author with code generated through instructions provided to Copilot AI.
+# =====================================================
+
+import pandas as pd
+import numpy as np
+import os
+import shutil
+
+
+# Load your CSV
+df = pd.read_csv("D:\Flor\SaudiArabia\YamnetResults\YamnetWeather1minfiles.csv")
+
+# -----------------------------
+# 1. SAMPLE 100 FILES WITH NO WEATHER
+# -----------------------------
+none_group = df[(df['WeatherClasses'] == 'NONE') & (df['WeatherPercent'] == 0)]
+none_sample = none_group.sample(n=100, random_state=42)
+
+# -----------------------------
+# 2. SAMPLE 100 FILES WITH WEATHER
+#    STRATIFIED ACROSS WEATHER_PERCENT
+# -----------------------------
+weather_group = df[df['WeatherClasses'] != 'NONE']
+
+# Create 10 equal-width bins across the range of weather_percent
+weather_group['bin'] = pd.cut(weather_group['WeatherPercent'], bins=10)
+
+# Sample 100 total → 10 bins × 10 samples per bin
+weather_sample = (
+    weather_group
+    .groupby('bin', group_keys=False)
+    .apply(lambda x: x.sample(n=10, random_state=42))
+)
+
+# -----------------------------
+# 3. COMBINE THE TWO SAMPLES
+# -----------------------------
+final_sample = pd.concat([none_sample, weather_sample], ignore_index=True)
+
+# Save to CSV
+final_sample.to_csv(r"D:\Flor\SaudiArabia\YamnetResults\sampled_files.csv", index=False)
+
+        
+# -----------------------------
+## -----------------------------
+# 4. GENERATE HTML VALIDATION PAGE
+# -----------------------------
+
+html_file = "validation_page.html"
+
+weather_classes = [
+    "NONE",
+    "Rain",
+    "Rain on surface",
+    "Raindrop",
+    "Wind",
+    "Wind noise (microphone)"
+]
+
+# Build dropdown HTML
+dropdown_html = "".join([f'<option value="{w}">{w}</option>' for w in weather_classes])
+
+rows = []
+for _, row in final_sample.iterrows():
+    filename = row['Filename']
+    display_name = os.path.basename(filename)
+    weather_class = row['WeatherClasses']
+    weather_percent = row['WeatherPercent']
+
+    # Convert Windows path to browser-friendly path
+    link = filename.replace("\\", "/")
+
+    rows.append(f"""
+        <tr>
+            <td data-weather="{weather_class}" data-percent="{weather_percent}">
+                {display_name}
+            </td>
+            <td>
+                <audio controls>
+                    <source src="{link}" type="audio/wav">
+                    Your browser does not support audio playback.
+                </audio>
+            </td>
+            <td>
+                <select>
+                    {dropdown_html}
+                </select>
+            </td>
+            <td>
+                <button onclick="openAudacity('{link}')">Open in Audacity</button>
+            </td>
+        </tr>
+    """)
+
+# Full HTML document with CSV export + Audacity hook
+html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Weather Validation Sheet</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+        }}
+        th, td {{
+            border: 1px solid #ccc;
+            padding: 8px;
+        }}
+        th {{
+            background-color: #f2f2f2;
+        }}
+        select {{
+            width: 180px;
+        }}
+        button {{
+            margin-top: 10px;
+            padding: 6px 12px;
+            font-size: 14px;
+        }}
+    </style>
+</head>
+<body>
+    <h2>Weather Validation Sheet</h2>
+    <p>Listen, label, and export your validation results.</p>
+
+    <table>
+        <tr>
+            <th>Filename</th>
+            <th>Audio</th>
+            <th>Validation Class</th>
+            <th>External Tool</th>
+        </tr>
+        {''.join(rows)}
+    </table>
+
+    <button onclick="downloadCSV()">Download Validation CSV</button>
+
+    <script>
+    function openAudacity(filepath) {{
+        // Requires a local Python server (audacity_server.py) listening on port 5001
+        fetch("http://localhost:5001/open?file=" + encodeURIComponent(filepath));
+    }}
+
+    function downloadCSV() {{
+        let rows = [];
+        rows.push(["Filename", "WeatherClass", "WeatherPercent", "ValidationClass"]);
+
+        const table = document.querySelector("table");
+        const trs = table.querySelectorAll("tr");
+
+        for (let i = 1; i < trs.length; i++) {{
+            const tds = trs[i].querySelectorAll("td");
+
+            const filename = tds[0].innerText.trim();
+            const weatherClass = tds[0].getAttribute("data-weather");
+            const weatherPercent = tds[0].getAttribute("data-percent");
+            const validationClass = tds[2].querySelector("select").value;
+
+            rows.push([filename, weatherClass, weatherPercent, validationClass]);
+        }}
+
+        let csvContent = "";
+        rows.forEach(row => {{
+            csvContent += row.join(",") + "\\n";
+        }});
+
+        const blob = new Blob([csvContent], {{ type: "text/csv" }});
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "validation_results.csv";
+        a.click();
+
+        URL.revokeObjectURL(url);
+    }}
+    </script>
+
+</body>
+</html>
+"""
+
+with open(html_file, "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+print(f"HTML validation file created: {html_file}")

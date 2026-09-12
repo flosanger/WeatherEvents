@@ -1,0 +1,156 @@
+# =====================================================
+# Identifying Weather Events. Processing Script
+# Functionality: Florencia Sangermano
+# Development: The functionality of this script was designed by the author with code generated through instructions provided to Copilot AI.
+# =====================================================
+
+import tensorflow as tf
+import tensorflow_hub as hub
+import numpy as np
+import pandas as pd
+import os
+import librosa
+import soundfile as sf
+import gc
+
+# =====================================================
+# LOAD YAMNET
+# =====================================================
+
+print("Loading YAMNet...")
+
+yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
+
+class_map_path = tf.keras.utils.get_file(
+    "yamnet_class_map.csv",
+    "https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv"
+)
+
+class_names = [
+    line.strip().split(",")[2]
+    for line in open(class_map_path).readlines()[1:]
+]
+
+print(f"Loaded {len(class_names)} classes")
+
+# =====================================================
+# WEATHER CLASSES
+# =====================================================
+
+weather_keywords = [
+    "Rain",
+    "Rain on surface",
+    "Raindrop",
+    "Wind",
+    "Wind noise (microphone)"
+]
+
+# =====================================================
+# INPUT / OUTPUT
+# =====================================================
+
+audio_folder = r"D:/Flor/SaudiArabia/Data/WavsChannel60"
+output_csv = r"D:/Flor/SaudiArabia/YamnetResults/weather_labels_summary.csv"
+
+# =====================================================
+# FIND WAV FILES
+# =====================================================
+
+wav_files = []
+
+for root, _, files in os.walk(audio_folder):
+    for file in files:
+        if file.lower().endswith(".wav"):
+            wav_files.append(os.path.join(root, file))
+
+print(f"Found {len(wav_files)} wav files")
+
+# =====================================================
+# RESUME FROM PREVIOUS RUN
+# =====================================================
+
+if os.path.exists(output_csv):
+    processed = set(pd.read_csv(output_csv, usecols=["Filename"])["Filename"])
+    print(f"Found {len(processed)} previously processed files")
+else:
+    processed = set()
+
+first_write = not os.path.exists(output_csv)
+
+# =====================================================
+# PROCESS FILES
+# =====================================================
+
+for i, filepath in enumerate(wav_files):
+
+    if filepath in processed:
+        continue
+
+    try:
+        print(f"\nProcessing {i+1}/{len(wav_files)}")
+        print(os.path.basename(filepath))
+
+        # READ AUDIO
+        wav_data, sr = sf.read(filepath)
+
+        # Convert stereo to mono
+        if len(wav_data.shape) > 1:
+            wav_data = np.mean(wav_data, axis=1)
+
+        # Resample to 16 kHz
+        if sr != 16000:
+            wav_data = librosa.resample(wav_data, orig_sr=sr, target_sr=16000)
+            sr = 16000
+
+        # RUN YAMNET
+        scores, embeddings, spectrogram = yamnet_model(wav_data)
+        scores_np = scores.numpy()
+
+        # CLASSIFICATION OF EACH CHUNK
+        chunk_labels = np.argmax(scores_np, axis=1)
+        detected_labels = [class_names[idx] for idx in chunk_labels]
+        total_chunks = len(chunk_labels)
+
+        # WEATHER SUMMARY
+        weather_labels = [label for label in detected_labels if label in weather_keywords]
+        weather_chunk_count = len(weather_labels)
+        weather_percent = round(100 * weather_chunk_count / total_chunks, 2)
+
+        weather_types = sorted(set(weather_labels))
+        weather_summary = "NONE" if len(weather_types) == 0 else "; ".join(weather_types)
+
+        # OUTPUT ROW (ONLY WEATHER SUMMARY)
+        row = {
+            "Filename": filepath,
+            "WeatherClasses": weather_summary,
+            "WeatherChunkCount": weather_chunk_count,
+            "WeatherPercent": weather_percent,
+            "TotalChunks": total_chunks
+        }
+
+        # WRITE ROW
+        pd.DataFrame([row]).to_csv(
+            output_csv,
+            mode="a",
+            header=first_write,
+            index=False
+        )
+
+        first_write = False
+        processed.add(filepath)
+
+        # CLEAN MEMORY
+        del wav_data, scores, embeddings, spectrogram
+        del scores_np, chunk_labels, detected_labels, row
+        gc.collect()
+
+        if len(processed) % 100 == 0:
+            print(f"Processed {len(processed)} files")
+
+    except Exception as e:
+        print(f"\nERROR: {os.path.basename(filepath)}")
+        print(str(e))
+        continue
+
+print("\n✅ ALL FILES COMPLETED")
+print(f"\nOutput saved to:\n{output_csv}")
