@@ -1,0 +1,14 @@
+from flask import Flask, request
+import subprocess
+
+app = Flask(__name__)
+
+AUDACITY_PATH = r"C:\Program Files\Audacity\Audacity.exe"  # <-- CHANGE THIS
+
+@app.route("/open")
+def open_file():
+    filepath = request.args.get("file")
+    subprocess.Popen([AUDACITY_PATH, filepath])
+    return "OK"
+
+app.run(port=5001)
