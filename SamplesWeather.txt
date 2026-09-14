@@ -4,40 +4,71 @@
 # Development: The functionality of this script was designed by the author with code generated through instructions provided to Copilot AI.
 # =====================================================
 
-import tensorflow as tf
-import tensorflow_hub as hub
-import numpy as np
 import pandas as pd
+import numpy as np
 import os
-import librosa
-import soundfile as sf
-import gc
+import shutil
 
-# =====================================================
-# LOAD YAMNET
-# =====================================================
 
-print("Loading YAMNet...")
+# Load your CSV
+df = pd.read_csv("D:\Flor\SaudiArabia\YamnetResults\weather_labels_summaryWithConfidence.csv")
 
-yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
+# -----------------------------
+# 1. SAMPLE 100 FILES WITH NO WEATHER
+# -----------------------------
+none_group = df[(df['WeatherClasses'] == 'NONE') & (df['WeatherPercent'] == 0)]
+none_sample = none_group.sample(n=100, random_state=42)
 
-class_map_path = tf.keras.utils.get_file(
-    "yamnet_class_map.csv",
-    "https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv"
+# -----------------------------
+# 2. SAMPLE 100 FILES WITH WEATHER
+#    STRATIFIED ACROSS WEATHER_PERCENT
+# -----------------------------
+weather_group = df[df['WeatherClasses'] != 'NONE']
+
+# Create 10 equal-width bins across the range of weather_percent
+weather_group['bin'] = pd.cut(weather_group['WeatherPercent'], bins=10)
+
+# Sample 100 total → 10 bins × 10 samples per bin
+weather_sample = (
+    weather_group
+    .groupby('bin', group_keys=False)
+    .apply(lambda x: x.sample(n=10, random_state=42))
 )
 
-class_names = [
-    line.strip().split(",")[2]
-    for line in open(class_map_path).readlines()[1:]
-]
+# -----------------------------
+# 3. COMBINE THE TWO SAMPLES
+# -----------------------------
+final_sample = pd.concat([none_sample, weather_sample], ignore_index=True)
 
-print(f"Loaded {len(class_names)} classes")
+# Save to CSV
+final_sample.to_csv(r"D:\Flor\SaudiArabia\YamnetResults\sampled_files_Final.csv", index=False)
 
-# =====================================================
-# WEATHER CLASSES
-# =====================================================
+# -----------------------------
+# 4. COPY FILES TO NEW FOLDER
+# -----------------------------
 
-weather_keywords = [
+# Folder where files will be copied
+output_folder = r"D:\Flor\SaudiArabia\YamnetResults\forvalidation_Final"
+
+# Create folder if it doesn't exist
+os.makedirs(output_folder, exist_ok=True)
+
+# Loop through each file in the Filename column and copy it
+for filepath in final_sample['Filename']:
+    if os.path.isfile(filepath):  # ensure file exists
+        shutil.copy(filepath, output_folder)
+    else:
+        print(f"WARNING: File not found → {filepath}")
+        
+# -----------------------------
+## -----------------------------
+# 5. GENERATE HTML VALIDATION PAGE
+# -----------------------------
+
+html_file = r"D:\Flor\SaudiArabia\YamnetResults\validation_page_final.html"
+
+weather_classes = [
+    "NONE",
     "Rain",
     "Rain on surface",
     "Raindrop",
@@ -45,130 +76,170 @@ weather_keywords = [
     "Wind noise (microphone)"
 ]
 
-# =====================================================
-# INPUT / OUTPUT
-# =====================================================
+# Build dropdown HTML
+dropdown_html = "".join([f'<option value="{w}">{w}</option>' for w in weather_classes])
 
-audio_folder = r"D:/Flor/SaudiArabia/Data/WavsChannel60"
-output_csv = r"D:/Flor/SaudiArabia/YamnetResults/weather_labels_summaryWithConfidence.csv"
+rows = []
+for _, row in final_sample.iterrows():
+    filename = row['Filename']
+    display_name = os.path.basename(filename)
+    weather_class = row['WeatherClasses']
+    weather_percent = row['WeatherPercent']
+
+    # Convert Windows path to browser-friendly path
+    link = filename.replace("\\", "/")
+
+    rows.append(f"""
+        <tr>
+            <td data-weather="{weather_class}" data-percent="{weather_percent}">
+                {display_name}
+            </td>
+            <td>
+                <select>
+                    {dropdown_html}
+                </select>
+            </td>
+            <td>
+                <button onclick="openAudacity('{link}')">Open in Audacity</button>
+            </td>
+            <td>
+                <input type="text" placeholder="Write notes here..." style="width:180px;">
+            </td>
+        </tr>
+    """)
 
 
-# =====================================================
-# FIND WAV FILES
-# =====================================================
+# Full HTML document with CSV export + Audacity hook
+html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Weather Validation Sheet</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+        }}
+        th, td {{
+            border: 1px solid #ccc;
+            padding: 8px;
+        }}
+        th {{
+            background-color: #f2f2f2;
+        }}
+        select {{
+            width: 180px;
+        }}
+        input[type='text'] {{
+            width: 180px;
+        }}
+        button {{
+            margin-top: 10px;
+            padding: 6px 12px;
+            font-size: 14px;
+        }}
+    </style>
+</head>
+<body>
+    <h2>YAMNet Weather Validation Sheet</h2>
+    <p>Listen, label, write notes, and export your validation results.</p>
+    <p>Please cite the use of this as: Sangermano, F. (2026). YAMNet Weather Validation Interface for Soundscape Analysis. GitHub Repository. https://github.com/flosanger/WeatherEvents/ .</p>
 
-wav_files = []
+    <table>
+        <tr>
+            <th>Filename</th>
+            <th>Validation Class</th>
+            <th>External Tool</th>
+            <th>Notes</th>
+        </tr>
+        {''.join(rows)}
+    </table>
 
-for root, _, files in os.walk(audio_folder):
-    for file in files:
-        if file.lower().endswith(".wav"):
-            wav_files.append(os.path.join(root, file))
+    <button onclick="downloadCSV()">Download Validation CSV</button>
+    <button onclick="saveHTML()">Save HTML with Edits</button>
 
-print(f"Found {len(wav_files)} wav files")
+    <script>
+    function openAudacity(filepath) {{
+        fetch("http://localhost:5001/open?file=" + encodeURIComponent(filepath));
+    }}
 
-# =====================================================
-# RESUME FROM PREVIOUS RUN
-# =====================================================
+    function downloadCSV() {{
+        let rows = [];
+        rows.push(["Filename", "WeatherClass", "WeatherPercent", "ValidationClass", "Notes"]);
 
-if os.path.exists(output_csv):
-    processed = set(pd.read_csv(output_csv, usecols=["Filename"])["Filename"])
-    print(f"Found {len(processed)} previously processed files")
-else:
-    processed = set()
+        const table = document.querySelector("table");
+        const trs = table.querySelectorAll("tr");
 
-first_write = not os.path.exists(output_csv)
+        for (let i = 1; i < trs.length; i++) {{
+            const tds = trs[i].querySelectorAll("td");
 
-# =====================================================
-# PROCESS FILES
-# =====================================================
+            const filename = tds[0].innerText.trim();
+            const weatherClass = tds[0].getAttribute("data-weather");
+            const weatherPercent = tds[0].getAttribute("data-percent");
+            const validationClass = tds[1].querySelector("select").value;
+            const notes = tds[3].querySelector("input").value;
 
-for i, filepath in enumerate(wav_files):
+            rows.push([filename, weatherClass, weatherPercent, validationClass, notes]);
+        }}
 
-    if filepath in processed:
-        continue
+        let csvContent = "";
+        rows.forEach(row => {{
+            csvContent += row.join(",") + "\\n";
+        }});
 
-    try:
-        print(f"\nProcessing {i+1}/{len(wav_files)}")
-        print(os.path.basename(filepath))
+        const blob = new Blob([csvContent], {{ type: "text/csv" }});
+        const url = URL.createObjectURL(blob);
 
-        # READ AUDIO
-        wav_data, sr = sf.read(filepath)
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = r"D:\Flor\SaudiArabia\YamnetResults\validation_resultsFinal.csv";
+        a.click();
 
-        # Convert stereo to mono
-        if len(wav_data.shape) > 1:
-            wav_data = np.mean(wav_data, axis=1)
+        URL.revokeObjectURL(url);
+    }}
 
-        # Resample to 16 kHz
-        if sr != 16000:
-            wav_data = librosa.resample(wav_data, orig_sr=sr, target_sr=16000)
-            sr = 16000
+    function saveHTML() {{
+        let cloned = document.documentElement.cloneNode(true);
 
-        # RUN YAMNET
-        scores, embeddings, spectrogram = yamnet_model(wav_data)
-        scores_np = scores.numpy()
+        const originalRows = document.querySelectorAll("tr");
+        const clonedRows = cloned.querySelectorAll("tr");
 
-        # CLASSIFICATION OF EACH CHUNK
-        chunk_labels = np.argmax(scores_np, axis=1)
-        detected_labels = [class_names[idx] for idx in chunk_labels]
-        total_chunks = len(chunk_labels)
+        for (let i = 1; i < originalRows.length; i++) {{
+            const origTds = originalRows[i].querySelectorAll("td");
+            const cloneTds = clonedRows[i].querySelectorAll("td");
 
-        # WEATHER SUMMARY WITH PER-CLASS MAX CONFIDENCE
-        weather_indices = [i for i, label in enumerate(detected_labels) if label in weather_keywords]
+            const validationClass = origTds[1].querySelector("select").value;
+            cloneTds[1].querySelector("select").value = validationClass;
 
-        weather_labels = [detected_labels[i] for i in weather_indices]
-        weather_chunk_count = len(weather_labels)
-        weather_percent = round(100 * weather_chunk_count / total_chunks, 2)
+            const notes = origTds[3].querySelector("input").value;
+            cloneTds[3].querySelector("input").value = notes;
+        }}
 
-        weather_types = sorted(set(weather_labels))
-        weather_summary = "NONE" if len(weather_types) == 0 else "; ".join(weather_types)
+        const htmlString = "<!DOCTYPE html>\\n" + cloned.outerHTML;
+        const blob = new Blob([htmlString], {{ type: "text/html" }});
+        const url = URL.createObjectURL(blob);
 
-        # Compute max confidence per weather class
-        weather_confidence_list = []
-        if weather_types:
-            for w in weather_types:
-                # indices where this weather class was detected
-                w_inds = [i for i in weather_indices if detected_labels[i] == w]
-                # max confidence for this class
-                w_conf = max(scores_np[i][class_names.index(w)] for i in w_inds)
-                weather_confidence_list.append(round(float(w_conf), 4))
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = r"D:\Flor\SaudiArabia\YamnetResults\validation_page_with_editsFinal.html";
+        a.click();
 
-            weather_confidence_list_str = ", ".join(map(str, weather_confidence_list))
-        else:
-            weather_confidence_list_str = ""
+        URL.revokeObjectURL(url);
+    }}
+    </script>
 
-        # OUTPUT ROW (ONLY WEATHER SUMMARY)
-        row = {
-            "Filename": filepath,
-            "WeatherClasses": weather_summary,
-            "WeatherChunkCount": weather_chunk_count,
-            "WeatherPercent": weather_percent,
-            "TotalChunks": total_chunks,
-            "WeatherConfidenceList": weather_confidence_list_str,
-        }
+</body>
+</html>
+"""
 
-        # WRITE ROW
-        pd.DataFrame([row]).to_csv(
-            output_csv,
-            mode="a",
-            header=first_write,
-            index=False
-        )
 
-        first_write = False
-        processed.add(filepath)
 
-        # CLEAN MEMORY
-        del wav_data, scores, embeddings, spectrogram
-        del scores_np, chunk_labels, detected_labels, row
-        gc.collect()
+with open(html_file, "w", encoding="utf-8") as f:
+    f.write(html_content)
 
-        if len(processed) % 100 == 0:
-            print(f"Processed {len(processed)} files")
-
-    except Exception as e:
-        print(f"\nERROR: {os.path.basename(filepath)}")
-        print(str(e))
-        continue
-
-print("\n✅ ALL FILES COMPLETED")
-print(f"\nOutput saved to:\n{output_csv}")
+print(f"HTML validation file created: {html_file}")
