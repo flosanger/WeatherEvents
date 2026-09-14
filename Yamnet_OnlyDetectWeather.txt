@@ -3,7 +3,6 @@
 # Functionality: Florencia Sangermano
 # Development: The functionality of this script was designed by the author with code generated through instructions provided to Copilot AI.
 # =====================================================
-
 import tensorflow as tf
 import tensorflow_hub as hub
 import numpy as np
@@ -50,7 +49,8 @@ weather_keywords = [
 # =====================================================
 
 audio_folder = r"D:/Flor/SaudiArabia/Data/WavsChannel60"
-output_csv = r"D:/Flor/SaudiArabia/YamnetResults/weather_labels_summary.csv"
+output_csv = r"D:/Flor/SaudiArabia/YamnetResults/weather_labels_summaryWithConfidence.csv"
+
 
 # =====================================================
 # FIND WAV FILES
@@ -111,13 +111,29 @@ for i, filepath in enumerate(wav_files):
         detected_labels = [class_names[idx] for idx in chunk_labels]
         total_chunks = len(chunk_labels)
 
-        # WEATHER SUMMARY
-        weather_labels = [label for label in detected_labels if label in weather_keywords]
+        # WEATHER SUMMARY WITH PER-CLASS MAX CONFIDENCE
+        weather_indices = [i for i, label in enumerate(detected_labels) if label in weather_keywords]
+
+        weather_labels = [detected_labels[i] for i in weather_indices]
         weather_chunk_count = len(weather_labels)
         weather_percent = round(100 * weather_chunk_count / total_chunks, 2)
 
         weather_types = sorted(set(weather_labels))
         weather_summary = "NONE" if len(weather_types) == 0 else "; ".join(weather_types)
+
+        # Compute max confidence per weather class
+        weather_confidence_list = []
+        if weather_types:
+            for w in weather_types:
+                # indices where this weather class was detected
+                w_inds = [i for i in weather_indices if detected_labels[i] == w]
+                # max confidence for this class
+                w_conf = max(scores_np[i][class_names.index(w)] for i in w_inds)
+                weather_confidence_list.append(round(float(w_conf), 4))
+
+            weather_confidence_list_str = ", ".join(map(str, weather_confidence_list))
+        else:
+            weather_confidence_list_str = ""
 
         # OUTPUT ROW (ONLY WEATHER SUMMARY)
         row = {
@@ -125,7 +141,8 @@ for i, filepath in enumerate(wav_files):
             "WeatherClasses": weather_summary,
             "WeatherChunkCount": weather_chunk_count,
             "WeatherPercent": weather_percent,
-            "TotalChunks": total_chunks
+            "TotalChunks": total_chunks,
+            "WeatherConfidenceList": weather_confidence_list_str,
         }
 
         # WRITE ROW
