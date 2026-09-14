@@ -21,12 +21,20 @@ none_sample = none_group.sample(n=100, random_state=42)
 
 # -----------------------------
 # 2. SAMPLE 100 FILES WITH WEATHER
-#    STRATIFIED ACROSS WEATHER_PERCENT
+#    STRATIFIED ACROSS MAX CONFIDENCE
 # -----------------------------
-weather_group = df[df['WeatherClasses'] != 'NONE']
+weather_group = df[df['WeatherClasses'] != 'NONE'].copy()
 
-# Create 10 equal-width bins across the range of weather_percent
-weather_group['bin'] = pd.cut(weather_group['WeatherPercent'], bins=10)
+# Compute MaxConfidence from WeatherConfidenceList
+def extract_max_conf(conf_list):
+    if pd.isna(conf_list) or conf_list.strip() == "":
+        return 0.0
+    return max(float(x) for x in conf_list.split(","))
+
+weather_group['MaxConfidence'] = weather_group['WeatherConfidenceList'].apply(extract_max_conf)
+
+# Create 10 equal-width bins across the range of MaxConfidence
+weather_group['bin'] = pd.cut(weather_group['MaxConfidence'], bins=10)
 
 # Sample 100 total → 10 bins × 10 samples per bin
 weather_sample = (
@@ -34,6 +42,7 @@ weather_sample = (
     .groupby('bin', group_keys=False)
     .apply(lambda x: x.sample(n=10, random_state=42))
 )
+
 
 # -----------------------------
 # 3. COMBINE THE TWO SAMPLES
@@ -65,6 +74,7 @@ for filepath in final_sample['Filename']:
 # 5. GENERATE HTML VALIDATION PAGE
 # -----------------------------
 
+# html output file
 html_file = r"D:\Flor\SaudiArabia\YamnetResults\validation_page_final.html"
 
 weather_classes = [
