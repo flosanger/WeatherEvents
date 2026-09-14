@@ -3,7 +3,6 @@
 # Functionality: Florencia Sangermano
 # Development: The functionality of this script was designed by the author with code generated through instructions provided to Copilot AI.
 # =====================================================
-
 import pandas as pd
 import numpy as np
 import os
@@ -207,7 +206,7 @@ html_content = f"""
 
         const a = document.createElement("a");
         a.href = url;
-        a.download = r"D:\Flor\SaudiArabia\YamnetResults\validation_resultsFinal.csv";
+        a.download = "D:/Flor/SaudiArabia/YamnetResults/validation_resultsFinal.csv";
         a.click();
 
         URL.revokeObjectURL(url);
@@ -236,7 +235,7 @@ html_content = f"""
 
         const a = document.createElement("a");
         a.href = url;
-        a.download = r"D:\Flor\SaudiArabia\YamnetResults\validation_page_with_editsFinal.html";
+        a.download = "D:/Flor/SaudiArabia/YamnetResults/validation_page_with_editsFinal.html";
         a.click();
 
         URL.revokeObjectURL(url);
